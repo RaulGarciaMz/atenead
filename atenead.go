@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RaulGarciaMz/atenead/colector"
 	"github.com/RaulGarciaMz/atenead/modelos"
+	"github.com/RaulGarciaMz/go-httpclient/gohttp"
 )
 
 var (
@@ -33,38 +35,40 @@ func main() {
 	version := generaVersion()
 	parseCmdLineFlags(version)
 
-	colInfo := NewColector(&http.Client{})
+	colInfo := colector.NewColector(&http.Client{})
+	clHttp := gohttp.NewBuilder().SetHttpClient(&http.Client{}).Build()
 
 	ticker := time.NewTicker(60 * time.Second)
 	for {
 		select {
 		case <-ticker.C:
 
-			// Obtener la lista de equipos de la BDD, ya sea por repositorio o por llamado a API
-			var equipos []Equipo
-			// Obtener la lista de alarmas en BDD, ya sea por repositorio o por llamado a API
-			var alarmas []modelos.ListaAlarma
-			// crear map de alarmas en BDD para busquedas
-			alarmasEnBdd := make(map[string]modelos.ListaAlarma, len(alarmas))
-			for _, ala := range alarmas {
-
-				var mp string
-				if ala.MsgPort != nil {
-					mp = strconv.Itoa(*ala.MsgPort)
-				}
-
-				clave := fmt.Sprintf("%d%s%d%d%d%d", ala.IdEquipo, ala.Equipo, ala.MsgId, ala.MsgSlot, ala.MsgInstance, &mp)
-
-				alarmasEnBdd[clave] = ala
+			//Obtiene la lista de los equipos
+			urlEq := "https://184.172.110.87:8085/atenea/admin/equipo"
+			responseEq, errcli := clHttp.Get(urlEq)
+			if errcli != nil {
+				return
 			}
 
+			if responseEq.StatusCode != 200 {
+				return
+			}
+
+			var equipos []modelos.Equipo
+
+			err := responseEq.UnmarshallJson(equipos)
+			if err != nil {
+				return
+			}
+
+			// Colecta la información de alarmas de cada equipo
 			for _, eq := range equipos {
 
 				sb := strings.Builder{}
 				sb.WriteString("http://")
-				sb.WriteString(*eq.Ip)
+				sb.WriteString(eq.Ip)
 				sb.WriteString(":5959/automation/service/v1")
-				datos, err := colInfo.ColectaInformacion(*eq.Id, *eq.Nombre, sb.String())
+				datos, err := colInfo.ColectaInformacion(eq.Id, eq.Nombre, sb.String())
 				if err != nil {
 				}
 
@@ -72,44 +76,10 @@ func main() {
 					//Marcar al equipos con bandera que indique que tiene filtros configurados
 				}
 
-				// Obtener las alarmas que no están registradas
-				var alNoRegistradas []modelos.ListaAlarma
-				for k, a := range datos.Alarmas {
-
-					if _, ok := alarmasEnBdd[k]; !ok {
-						alNoRegistradas = append(alNoRegistradas, a)
-					}
-				}
-				//Obtener las alarmas que no están en BDD para clarearlas
-				var alNoEnBdd []modelos.ListaAlarma
-				for k, a := range alarmasEnBdd {
-
-					if _, ok := datos.Alarmas[k]; !ok {
-						alNoEnBdd = append(alNoEnBdd, a)
-					}
-				}
-
 			}
 
 		}
 	}
-
-	//
-	// //con getAlarmaList -------
-	//
-	//Obtener lista de alarmas registradas en la BDD - ALReg (¿TODAS las alarmas? ... faltaría una función que traiga todas las alarmas... o sea sin clasificar)
-	//Algo así como alarmasEnBdd := Repo.GetAlarmas
-	//De la lista de alarmas, filtrar aquellas que no están registradas aún
-
-	// // las filtradas se registran en la BDD con fecha modificada con la diferencia calculada y se marca como activa
-	//
-	// //Discriminar las que ya están registradas en BDD
-	// //O sea de una lista de alarmas enviada a una consulta, obtener las
-	// //.... Cómo obtener alarmas registradas o de una lista de alarmas, regresar las que NO están registradas
-	//
-	// //Al contrario, De la lista de alarmas registradas en la BDD, determinar las que ya no están en la Lista obtenida
-	// //egistrar hora del clareo y eliminarla de la bdd
-
 }
 
 func parseCmdLineFlags(version string) {
