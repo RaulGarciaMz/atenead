@@ -34,7 +34,7 @@ func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl 
 
 	var resp *modelos.ColectadoServidor
 	hayFiltro := false
-	ahorita := time.Now()
+
 	gtd, err := c.sc.GetDateTime(myurl)
 	if err != nil {
 		return resp, err
@@ -45,8 +45,6 @@ func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl 
 	if err != nil {
 		return resp, err
 	}
-
-	diff := ahorita.Sub(timeServer)
 
 	filter, err := c.sc.GetAlarmFilter(myurl)
 	if err != nil {
@@ -71,10 +69,10 @@ func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl 
 		mins := alarmasEnEquipo.SoapBody.Resp.AlarmList[i].MsgInstance
 
 		var mp string
-		var MsgPortVal *int
+		var MsgPortVal *int64
 		if alarmasEnEquipo.SoapBody.Resp.AlarmList[i].MsgPort != nil {
 			mp = *alarmasEnEquipo.SoapBody.Resp.AlarmList[i].MsgPort
-			intMsgPortVal, err := strconv.Atoi(mp)
+			intMsgPortVal, err := strconv.ParseInt(mp, 10, 64)
 			if err != nil {
 				return resp, err
 			}
@@ -106,25 +104,28 @@ func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl 
 			return resp, err
 		}
 
+		diff := MsgSetTimeVal.Sub(timeServer)
+
 		alEnEquipo[clave] = modelos.ListaAlarma{
-			IdEquipo:      idEquipo,
-			Equipo:        nombreEquipo,
-			MsgId:         int32(MsgIdVal),
-			MsgSlot:       MsgSlotVal,
-			MsgPort:       MsgPortVal,
-			MsgText:       alarmasEnEquipo.SoapBody.Resp.AlarmList[i].MsgText,
-			MsgSourceName: alarmasEnEquipo.SoapBody.Resp.AlarmList[i].MsgSourceName,
-			MsgSeverity:   alarmasEnEquipo.SoapBody.Resp.AlarmList[i].MsgSeverity,
-			MsgInstance:   MsgInstanceVal,
-			MsgSetTime:    MsgSetTimeVal,
-			MsgCardId:     int32(MsgCardIdVal),
+			IdEquipo:        idEquipo,
+			Equipo:          nombreEquipo,
+			MsgId:           int64(MsgIdVal),
+			MsgSlot:         int32(MsgSlotVal),
+			MsgPort:         MsgPortVal,
+			MsgText:         alarmasEnEquipo.SoapBody.Resp.AlarmList[i].MsgText,
+			MsgSourceName:   alarmasEnEquipo.SoapBody.Resp.AlarmList[i].MsgSourceName,
+			MsgSeverity:     alarmasEnEquipo.SoapBody.Resp.AlarmList[i].MsgSeverity,
+			MsgInstance:     int32(MsgInstanceVal),
+			MsgSetTime:      MsgSetTimeVal,
+			MsgCardId:       int32(MsgCardIdVal),
+			SetTimeAdjusted: MsgSetTimeVal.Add(diff),
 		}
 	}
 
 	resp = &modelos.ColectadoServidor{
 		HayFiltroAlarmas: hayFiltro,
-		DiferenciaTiempo: diff,
 		Alarmas:          alEnEquipo,
+		EquipoTimestamp:  timeServer,
 	}
 
 	return resp, nil

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/RaulGarciaMz/atenead/colector"
+	"github.com/RaulGarciaMz/go-httpclient/gohttp"
 )
 
 func TestColector_ColectaInformacion(t *testing.T) {
@@ -17,4 +18,29 @@ func TestColector_ColectaInformacion(t *testing.T) {
 	}
 
 	_ = data
+}
+
+func TestColector_HttpClient(t *testing.T) {
+
+	clHttp := gohttp.NewBuilder().SetHttpClient(&http.Client{}).DisableTimeouts(true).Build()
+
+	//Obtiene la lista de los equipos
+	urlEq := "http://184.172.110.87:8085/atenea/admin/equipo"
+	responseEq, errcli := clHttp.Get(urlEq)
+	if errcli != nil {
+		return
+	}
+
+	if responseEq.StatusCode != 200 {
+		return
+	}
+
+	/*
+		 	var equipos []modelos.Equipo
+
+			err := responseEq.UnmarshallJson(equipos)
+			if err != nil {
+				return
+			}
+	*/
 }
