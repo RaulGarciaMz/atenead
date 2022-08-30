@@ -38,3 +38,8 @@ type ListaAlarmasParam struct {
 	DateServer       string
 	TimeServer       string
 }
+
+type FiltroEquipoParam struct {
+	Id     int32
+	Filtro bool
+}

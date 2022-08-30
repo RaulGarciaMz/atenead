@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -10,6 +14,7 @@ import (
 	"time"
 
 	"github.com/RaulGarciaMz/atenead/colector"
+	"github.com/RaulGarciaMz/atenead/configuration"
 	"github.com/RaulGarciaMz/atenead/modelos"
 	"github.com/RaulGarciaMz/go-httpclient/gohttp"
 )
@@ -34,34 +39,58 @@ func main() {
 
 	version := generaVersion()
 	parseCmdLineFlags(version)
+	confFile, err := os.Open("atenea_dconf.json")
+	if err != nil {
+		log.Fatal("no pudo abrir el archivo de configuración")
+		panic(err)
+	}
+	defer confFile.Close()
+	conf, err := ioutil.ReadAll(confFile)
+	if err != nil {
+		log.Fatal("no pudo leer el archivo de configuración")
+		panic(err)
+	}
 
-	//Falta configuraciónde IP de Bdd de atenea y puerto
+	myConf := configuration.ServerConfig{}
+	err = json.Unmarshal(conf, &myConf)
+	if err != nil {
+		log.Fatal("no pudo interpretar el archivo de configuración")
+		panic(err)
+	}
+
+	if !IsValidIp(myConf.Ip) {
+		log.Fatal("error en archivo de configuración. IP inválida")
+		panic(fmt.Errorf("error en archivo de configuración. IP inválida"))
+	}
+
+	if myConf.Tick < 60 {
+		myConf.Tick = 60
+	} else if myConf.Tick > 120 {
+		myConf.Tick = 120
+	}
+
+	sb := strings.Builder{}
+	sb.WriteString("http://")
+	sb.WriteString(myConf.Ip)
+	sb.WriteString(":")
+	sb.WriteString(myConf.Port)
+	preUrl := sb.String()
 
 	colInfo := colector.NewColector(&http.Client{})
 	clHttp := gohttp.NewBuilder().SetHttpClient(&http.Client{}).DisableTimeouts(true).Build()
 
-	/* 	ticker := time.NewTicker(60 * time.Second)
+	/* 	ticker := time.NewTicker(myConf.Tick * time.Second)
 	   	for {
 	   		select {
-	   		case <-ticker.C: */
+	   		case <-ticker.C:
 
-	//Obtiene la lista de los equipos
-	urlEq := "http://184.72.110.87:8085/atenea/admin/equipo"
 
-	responseEq, errcli := clHttp.Get(urlEq)
-	if errcli != nil {
-		return
-	}
+			}
+		}*/
 
-	if responseEq.StatusCode != 200 {
-		return
-	}
-
-	equipos := []modelos.Equipo{}
-
-	err := responseEq.UnmarshallJson(&equipos)
+	equipos, err := ObtieneEquiposFromAtenea(preUrl, clHttp)
 	if err != nil {
-		return
+
 	}
 
 	// Colecta la información de alarmas de cada equipo
@@ -79,12 +108,26 @@ func main() {
 
 		// si no fue posible obtener datos del equipo, debe mandar mensaje y pasar al siguiente equipo
 		if err != nil {
+			//Escribe en el log el error de lectura en el equipo
 			continue
 		}
 
-		/* 			if datos.HayFiltroAlarmas {
-			//Marcar al equipos con bandera que indique que tiene filtros configurados
-		} */
+		//Cambia el valor del filtro
+		fltro := modelos.FiltroEquipoParam{
+			Id:     eq.Id,
+			Filtro: datos.HayFiltroAlarmas,
+		}
+		chFiltro, err := FiltroEquipo(preUrl, clHttp, &fltro)
+		if err != nil {
+			//Escribe en el log el error de modificación del filtro
+			continue
+		}
+
+		if chFiltro != "" {
+			//crear error por no poder cambiar el filtro
+			//Escribe en el log el error al ide modificación del filtro
+			continue
+		}
 
 		//Generar estructura para procesar alarmas y enviarlas a la API correspondiente
 		numAlarmas := len(datos.Alarmas)
@@ -131,23 +174,16 @@ func main() {
 			TimeServer:       datos.EquipoTimestamp.Format("15:04:05"),
 		}
 
-		//Envía al procesamiento de alarmas
-		urlEq := "http://184.72.110.87:8085/atenea/admin/alarma/procesa"
-		responseEq, errcli := clHttp.Post(urlEq, pa)
-		if errcli != nil {
-			return
+		res, err := ProcesaAlarmasAtenea(preUrl, clHttp, &pa)
+		if err != nil {
 		}
 
-		if responseEq.StatusCode != 200 {
-			return
+		if res == "Corrupto" {
+			//Registrar error de procesamiento de alarmas
 		}
 
 	}
 
-	/*
-		 		}
-			}
-	*/
 }
 
 func parseCmdLineFlags(version string) {
@@ -175,4 +211,65 @@ func generaVersion() string {
 		" Tag: " + Tag
 
 	return version
+}
+
+func ObtieneEquiposFromAtenea(preUrl string, clHttp gohttp.Client) ([]modelos.Equipo, error) {
+	//urlEq := "http://184.72.110.87:8085/atenea/admin/equipo"
+	sb := strings.Builder{}
+	sb.WriteString(preUrl)
+	sb.WriteString("/atenea/admin/equipo")
+
+	responseEq, errcli := clHttp.Get(sb.String())
+	if errcli != nil {
+		return nil, errcli
+	}
+
+	if responseEq.StatusCode != 200 {
+		return nil, fmt.Errorf("")
+	}
+
+	equipos := []modelos.Equipo{}
+
+	err := responseEq.UnmarshallJson(&equipos)
+	if err != nil {
+		return nil, fmt.Errorf("")
+	}
+
+	return equipos, nil
+}
+
+func ProcesaAlarmasAtenea(preUrl string, clHttp gohttp.Client, pa *modelos.ListaAlarmasParam) (string, error) {
+	sb := strings.Builder{}
+	sb.WriteString(preUrl)
+	sb.WriteString("/atenea/admin/alarma/procesa")
+	responseEq, errcli := clHttp.Post(sb.String(), pa)
+	if errcli != nil {
+		return "", errcli
+	}
+
+	if responseEq.StatusCode != 200 {
+		return "", fmt.Errorf("")
+	}
+
+	return responseEq.String(), nil
+}
+
+func FiltroEquipo(preUrl string, clHttp gohttp.Client, pa *modelos.FiltroEquipoParam) (string, error) {
+	sb := strings.Builder{}
+	sb.WriteString(preUrl)
+	sb.WriteString("/atenea/admin/equipo/filtro")
+	responseEq, errcli := clHttp.Post(sb.String(), pa)
+	if errcli != nil {
+		return "", errcli
+	}
+
+	if responseEq.StatusCode != 200 {
+		return "", fmt.Errorf("")
+	}
+
+	return responseEq.String(), nil
+}
+
+func IsValidIp(ip string) bool {
+	return net.ParseIP(ip) != nil
 }
