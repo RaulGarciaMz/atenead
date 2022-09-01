@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -28,164 +27,83 @@ var (
 	flgVersion     bool
 )
 
-type Equipo struct {
-	Id          *int32  `json:"id"`
-	Nombre      *string `json:"nombre"`
-	Ip          *string `json:"ip"`
-	Descripcion *string `json:"descripcion"`
-}
-
 func main() {
 
 	version := generaVersion()
 	parseCmdLineFlags(version)
-	confFile, err := os.Open("atenea_dconf.json")
+
+	myConf, err := leeConfiguracion()
 	if err != nil {
-		log.Fatal("no pudo abrir el archivo de configuración")
-		panic(err)
-	}
-	defer confFile.Close()
-	conf, err := ioutil.ReadAll(confFile)
-	if err != nil {
-		log.Fatal("no pudo leer el archivo de configuración")
 		panic(err)
 	}
 
-	myConf := configuration.ServerConfig{}
-	err = json.Unmarshal(conf, &myConf)
+	preUrl, err := generaUrlRestService(myConf)
 	if err != nil {
-		log.Fatal("no pudo interpretar el archivo de configuración")
 		panic(err)
 	}
 
-	if !IsValidIp(myConf.Ip) {
-		log.Fatal("error en archivo de configuración. IP inválida")
-		panic(fmt.Errorf("error en archivo de configuración. IP inválida"))
-	}
-
-	if myConf.Tick < 60 {
-		myConf.Tick = 60
-	} else if myConf.Tick > 120 {
-		myConf.Tick = 120
-	}
-
-	sb := strings.Builder{}
-	sb.WriteString("http://")
-	sb.WriteString(myConf.Ip)
-	sb.WriteString(":")
-	sb.WriteString(myConf.Port)
-	preUrl := sb.String()
-
-	colInfo := colector.NewColector(&http.Client{})
+	soapClient := colector.NewColector(&http.Client{})
 	clHttp := gohttp.NewBuilder().SetHttpClient(&http.Client{}).DisableTimeouts(true).Build()
+	ticker := time.NewTicker(time.Duration(myConf.Tick) * time.Minute)
+	defer ticker.Stop()
 
-	/* 	ticker := time.NewTicker(myConf.Tick * time.Second)
-	   	for {
-	   		select {
-	   		case <-ticker.C:
+	for ; true; <-ticker.C {
+		equipos, err := obtieneEquiposFromRestService(preUrl, clHttp)
+		if err != nil {
+			//log.Fatal("no fue posible obtener la lista de equipos")
+			continue
+		}
 
-
+		for _, eq := range equipos {
+			// Aquí puede haber goroutines
+			urlSoap := generaUrlSoapService(eq.Ip, "5959")
+			datos, err := soapClient.ColectaInformacion(eq.Id, eq.Nombre, urlSoap)
+			if err != nil {
+				// si no fue posible obtener datos del equipo, debe mandar mensaje y pasar al siguiente equipo
+				//Escribe en el log el error de lectura en el equipo
+				//log.Fatal("no fue posible obtener datos del equipo tal en la IP tal")
+				//fmt.Println("No se obtuvieron datos")
+				continue
 			}
-		}*/
 
-	equipos, err := ObtieneEquiposFromAtenea(preUrl, clHttp)
-	if err != nil {
+			fltro := modelos.FiltroEquipoParam{
+				Id:     eq.Id,
+				Filtro: datos.HayFiltroAlarmas,
+			}
+			chFiltro, err := filtroEquipoToRestService(preUrl, clHttp, &fltro)
+			if err != nil {
+				//Escribe en el log el error de modificación del filtro
+				//log.Fatal("error al intentar modificar el valor del campo filtro del equipo")
+				//fmt.Println("Error en FiltroEquipo")
+				continue
+			}
 
-	}
+			if chFiltro == "Corrupto" {
+				//crear error por no poder cambiar el filtro
+				//Escribe en el log el error al ide modificación del filtro
+				//log.Fatal("el intento de modificar el valor del campo filtro del equipo no fue exitoso")
+				//fmt.Println("Filtro no cambiado - corrupto")
+				continue
+			}
 
-	// Colecta la información de alarmas de cada equipo
-	for _, eq := range equipos {
-
-		// Aquí debe haber goroutines
-
-		sb := strings.Builder{}
-		sb.WriteString("http://")
-		sb.WriteString(eq.Ip)
-		sb.WriteString(":5959/automation/service/v1")
-		datos, err := colInfo.ColectaInformacion(eq.Id, eq.Nombre, sb.String())
-		//datos, err := colInfo.ColectaInformacion(eq.Id, eq.Nombre, "http://195.159.183.43:5959/automation/service/v1")
-		//
-
-		// si no fue posible obtener datos del equipo, debe mandar mensaje y pasar al siguiente equipo
-		if err != nil {
-			//Escribe en el log el error de lectura en el equipo
-			continue
+			pa := generaAlarmasDelEquipo(eq.Id, datos)
+			res, err := procesaAlarmasToRestService(preUrl, clHttp, pa)
+			if err != nil {
+				//fmt.Println("Error en ProcesaAlarmasAtenea")
+				//log.Fatal("error al intentar procesar las alarmas del sistema")
+				continue
+			}
+			if res == "Corrupto" {
+				//fmt.Println("Error en ProcesaAlarmasAtenea - Corrupto")
+				//Registrar error de procesamiento de alarmas
+				//log.Fatal("el intento de procesar las alarmas no fue exitoso")
+			}
 		}
-
-		//Cambia el valor del filtro
-		fltro := modelos.FiltroEquipoParam{
-			Id:     eq.Id,
-			Filtro: datos.HayFiltroAlarmas,
-		}
-		chFiltro, err := FiltroEquipo(preUrl, clHttp, &fltro)
-		if err != nil {
-			//Escribe en el log el error de modificación del filtro
-			continue
-		}
-
-		if chFiltro != "" {
-			//crear error por no poder cambiar el filtro
-			//Escribe en el log el error al ide modificación del filtro
-			continue
-		}
-
-		//Generar estructura para procesar alarmas y enviarlas a la API correspondiente
-		numAlarmas := len(datos.Alarmas)
-
-		msgIds := make([]int64, numAlarmas)
-		msgSlots := make([]int32, numAlarmas)
-		msgPorts := make([]*int64, numAlarmas)
-		msgTexts := make([]string, numAlarmas)
-		msgSourcesNames := make([]string, numAlarmas)
-		msgSeveryties := make([]string, numAlarmas)
-		msgInstances := make([]int32, numAlarmas)
-		msgSetTimes := make([]string, numAlarmas)
-		msgCardIds := make([]int32, numAlarmas)
-		timestampInicios := make([]string, numAlarmas)
-
-		count := 0
-		for _, v := range datos.Alarmas {
-			msgIds[count] = v.MsgId
-			msgSlots[count] = v.MsgSlot
-			msgPorts[count] = v.MsgPort
-			msgTexts[count] = v.MsgText
-			msgSourcesNames[count] = v.MsgSourceName
-			msgSeveryties[count] = v.MsgSeverity
-			msgInstances[count] = v.MsgInstance
-			msgSetTimes[count] = v.MsgSetTime.Format("2006-01-02 15:04:05")
-			msgCardIds[count] = v.MsgCardId
-			timestampInicios[count] = v.SetTimeAdjusted.Format("2006-01-02 15:04:05")
-			count++
-		}
-
-		pa := modelos.ListaAlarmasParam{
-			Id:               eq.Id,
-			MsgIds:           msgIds,
-			MsgSlots:         msgSlots,
-			MsgPorts:         msgPorts,
-			MsgTexts:         msgTexts,
-			MsgSourcesNames:  msgSourcesNames,
-			MsgSeveryties:    msgSeveryties,
-			MsgInstances:     msgInstances,
-			MsgSetTimes:      msgSetTimes,
-			MsgCardIds:       msgCardIds,
-			TimestampInicios: timestampInicios,
-			DateServer:       datos.EquipoTimestamp.Format("2006-01-02"),
-			TimeServer:       datos.EquipoTimestamp.Format("15:04:05"),
-		}
-
-		res, err := ProcesaAlarmasAtenea(preUrl, clHttp, &pa)
-		if err != nil {
-		}
-
-		if res == "Corrupto" {
-			//Registrar error de procesamiento de alarmas
-		}
-
 	}
 
 }
 
+// parseCmdLineFlags imprime la información de la versión del programa
 func parseCmdLineFlags(version string) {
 	flag.BoolVar(&flgVersion, "version", false, "si true, imprime la versión y termina el programa")
 	flag.Parse()
@@ -196,6 +114,7 @@ func parseCmdLineFlags(version string) {
 	}
 }
 
+// generaVersion genera información de la versión del programa con datos de GIT
 func generaVersion() string {
 	var version string
 
@@ -213,8 +132,62 @@ func generaVersion() string {
 	return version
 }
 
-func ObtieneEquiposFromAtenea(preUrl string, clHttp gohttp.Client) ([]modelos.Equipo, error) {
-	//urlEq := "http://184.72.110.87:8085/atenea/admin/equipo"
+// leeConfiguracion obtiene los datos de configuraciṕon para el sistema desde un archivo JSON
+func leeConfiguracion() (*configuration.ServerConfig, error) {
+
+	confFile, err := os.Open("atenea_dconf.json")
+	if err != nil {
+		return nil, err
+	}
+	defer confFile.Close()
+	conf, err := ioutil.ReadAll(confFile)
+	if err != nil {
+		return nil, err
+	}
+
+	myConf := configuration.ServerConfig{}
+	err = json.Unmarshal(conf, &myConf)
+	if err != nil {
+		return nil, err
+	}
+
+	if myConf.Tick < 1 {
+		myConf.Tick = 1
+	} else if myConf.Tick > 2 {
+		myConf.Tick = 2
+	}
+
+	return &myConf, nil
+}
+
+// generaUrlRestService genera la sección inicial del URL del servicio REST
+func generaUrlRestService(myConf *configuration.ServerConfig) (string, error) {
+	sb := strings.Builder{}
+
+	if !IsValidIp(myConf.Ip) {
+		return "", fmt.Errorf("error en archivo de configuración. IP inválida")
+	}
+
+	sb.WriteString("http://")
+	sb.WriteString(myConf.Ip)
+	sb.WriteString(":")
+	sb.WriteString(myConf.Port)
+	return sb.String(), nil
+}
+
+// generaUrlSoapService genera el URL del servicio SOAP de un equipo
+func generaUrlSoapService(ip, puerto string) string {
+	sb := strings.Builder{}
+	sb.WriteString("http://")
+	sb.WriteString(ip)
+	sb.WriteString(":")
+	sb.WriteString(puerto)
+	sb.WriteString("/automation/service/v1")
+	return sb.String()
+}
+
+// obtieneEquiposFromRestService obtiene la lista de los equipos desde el servicio REST
+func obtieneEquiposFromRestService(preUrl string, clHttp gohttp.Client) ([]modelos.Equipo, error) {
 	sb := strings.Builder{}
 	sb.WriteString(preUrl)
 	sb.WriteString("/atenea/admin/equipo")
@@ -225,51 +198,103 @@ func ObtieneEquiposFromAtenea(preUrl string, clHttp gohttp.Client) ([]modelos.Eq
 	}
 
 	if responseEq.StatusCode != 200 {
-		return nil, fmt.Errorf("")
+		return nil, fmt.Errorf("llamado a API %s con código %d ", sb.String(), responseEq.StatusCode)
 	}
 
 	equipos := []modelos.Equipo{}
 
 	err := responseEq.UnmarshallJson(&equipos)
 	if err != nil {
-		return nil, fmt.Errorf("")
+		return nil, err
 	}
 
 	return equipos, nil
 }
 
-func ProcesaAlarmasAtenea(preUrl string, clHttp gohttp.Client, pa *modelos.ListaAlarmasParam) (string, error) {
+// procesaAlarmasToRestService envía las alarmas obtenidas al servicio REST
+func procesaAlarmasToRestService(preUrl string, clHttp gohttp.Client, pa *modelos.ListaAlarmasParam) (string, error) {
 	sb := strings.Builder{}
 	sb.WriteString(preUrl)
 	sb.WriteString("/atenea/admin/alarma/procesa")
+
 	responseEq, errcli := clHttp.Post(sb.String(), pa)
 	if errcli != nil {
 		return "", errcli
 	}
 
 	if responseEq.StatusCode != 200 {
-		return "", fmt.Errorf("")
+		return "", fmt.Errorf("llamado a API %s con código %d ", sb.String(), responseEq.StatusCode)
 	}
 
 	return responseEq.String(), nil
 }
 
-func FiltroEquipo(preUrl string, clHttp gohttp.Client, pa *modelos.FiltroEquipoParam) (string, error) {
+// filtroEquipoToRestService envía al servicio REST el valor de la bandera de filtro para el equipo
+func filtroEquipoToRestService(preUrl string, clHttp gohttp.Client, pa *modelos.FiltroEquipoParam) (string, error) {
 	sb := strings.Builder{}
 	sb.WriteString(preUrl)
 	sb.WriteString("/atenea/admin/equipo/filtro")
+
 	responseEq, errcli := clHttp.Post(sb.String(), pa)
 	if errcli != nil {
 		return "", errcli
 	}
 
 	if responseEq.StatusCode != 200 {
-		return "", fmt.Errorf("")
+		return "", fmt.Errorf("llamado a API %s con código %d ", sb.String(), responseEq.StatusCode)
 	}
 
 	return responseEq.String(), nil
 }
 
+// IsValidIp verifica si el valor de ip es un dirección IP válida
 func IsValidIp(ip string) bool {
 	return net.ParseIP(ip) != nil
+}
+
+// generaAlarmasDelEquipo genera la estructura de alarmas requerida para enviarla al servicio REST
+func generaAlarmasDelEquipo(idEqu int32, datos *modelos.ColectadoServidor) *modelos.ListaAlarmasParam {
+	numAlarmas := len(datos.Alarmas)
+
+	msgIds := make([]int64, numAlarmas)
+	msgSlots := make([]int32, numAlarmas)
+	msgPorts := make([]*int64, numAlarmas)
+	msgTexts := make([]string, numAlarmas)
+	msgSourcesNames := make([]string, numAlarmas)
+	msgSeveryties := make([]string, numAlarmas)
+	msgInstances := make([]int32, numAlarmas)
+	msgSetTimes := make([]string, numAlarmas)
+	msgCardIds := make([]int32, numAlarmas)
+	timestampInicios := make([]string, numAlarmas)
+
+	count := 0
+	for _, v := range datos.Alarmas {
+		msgIds[count] = v.MsgId
+		msgSlots[count] = v.MsgSlot
+		msgPorts[count] = v.MsgPort
+		msgTexts[count] = v.MsgText
+		msgSourcesNames[count] = v.MsgSourceName
+		msgSeveryties[count] = v.MsgSeverity
+		msgInstances[count] = v.MsgInstance
+		msgSetTimes[count] = v.MsgSetTime.Format("2006-01-02 15:04:05")
+		msgCardIds[count] = v.MsgCardId
+		timestampInicios[count] = v.SetTimeAdjusted.Format("2006-01-02 15:04:05")
+		count++
+	}
+
+	return &modelos.ListaAlarmasParam{
+		Id:               idEqu,
+		MsgIds:           msgIds,
+		MsgSlots:         msgSlots,
+		MsgPorts:         msgPorts,
+		MsgTexts:         msgTexts,
+		MsgSourcesNames:  msgSourcesNames,
+		MsgSeveryties:    msgSeveryties,
+		MsgInstances:     msgInstances,
+		MsgSetTimes:      msgSetTimes,
+		MsgCardIds:       msgCardIds,
+		TimestampInicios: timestampInicios,
+		DateServer:       datos.EquipoTimestamp.Format("2006-01-02"),
+		TimeServer:       datos.EquipoTimestamp.Format("15:04:05"),
+	}
 }
