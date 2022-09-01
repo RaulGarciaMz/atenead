@@ -5,20 +5,19 @@ import (
 	"encoding/xml"
 	"errors"
 	"net/http"
-	//"net/url"
 	"strings"
 	"sync"
 
 	"github.com/RaulGarciaMz/atenead/modelos"
 )
 
+// AteneaSoapHttp define el cliente para servicios SOAP
 type AteneaSoapHttp struct {
-	cliente *http.Client
-	//url     string //http://195.159.183.43:5959/automation/service/v1"
-
+	cliente    *http.Client
 	clientOnce sync.Once
 }
 
+// NewAteneaSoapHttp crea un cliente para comunicación con servicios SOAP
 func NewAteneaSoapHttp(c *http.Client) (*AteneaSoapHttp, error) {
 
 	s := AteneaSoapHttp{}
@@ -34,6 +33,7 @@ func NewAteneaSoapHttp(c *http.Client) (*AteneaSoapHttp, error) {
 	return &s, nil
 }
 
+// GetDateTime consulta el servicio SOAP para obtener la fecha del equipo
 func (s *AteneaSoapHttp) GetDateTime(url string) (*modelos.GetTimeDateResponse, error) {
 
 	payload := []byte(strings.TrimSpace(`
@@ -82,6 +82,7 @@ func (s *AteneaSoapHttp) GetDateTime(url string) (*modelos.GetTimeDateResponse, 
 	return nil, errors.New("error no considerado para controlar")
 }
 
+// GetAlarmFilter consulta el servicio SOAP para obtener las alarmas con filtro del equipo
 func (s *AteneaSoapHttp) GetAlarmFilter(url string) (*modelos.GetAlarmFilterResponse, error) {
 
 	payload := []byte(strings.TrimSpace(`
@@ -130,6 +131,7 @@ func (s *AteneaSoapHttp) GetAlarmFilter(url string) (*modelos.GetAlarmFilterResp
 	return nil, errors.New("error no considerado para controlar")
 }
 
+// GetAlarmList consulta el servicio SOAP para obtener las alasrmas del equipo
 func (s *AteneaSoapHttp) GetAlarmList(url string) (*modelos.GetAlarmListResponse, error) {
 
 	// payload

@@ -14,6 +14,7 @@ type Colector struct {
 	sc *soapclient.AteneaSoapHttp
 }
 
+// NewColector crea una instancia del colector de datos para servicios SOAP
 func NewColector(client *http.Client) *Colector {
 
 	s, err := soapclient.NewAteneaSoapHttp(client)
@@ -25,6 +26,7 @@ func NewColector(client *http.Client) *Colector {
 	}
 }
 
+// ColectaInformacion Realiza el llamado al servicio SOAP del equipo indicado y procesa el resultado para obtener las alarmas con timestamp ajustado
 func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl string) (*modelos.ColectadoServidor, error) {
 
 	_, err := url.ParseRequestURI(myurl)
