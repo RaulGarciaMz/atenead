@@ -5,4 +5,5 @@ type Equipo struct {
 	Nombre      string `json:"nombre"`
 	Descripcion string `json:"descripcion"`
 	Ip          string `json:"ip"`
+	Puerto      int32  `json:"puerto"`
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -16,6 +17,9 @@ import (
 	"github.com/RaulGarciaMz/atenead/configuration"
 	"github.com/RaulGarciaMz/atenead/modelos"
 	"github.com/RaulGarciaMz/go-httpclient/gohttp"
+	"github.com/natefinch/lumberjack"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
@@ -25,6 +29,8 @@ var (
 	LastCommitTime string // when the last commit was
 	Tag            string // nombre del último tag registrado en la rama
 	flgVersion     bool
+
+	logger *zap.SugaredLogger
 )
 
 func main() {
@@ -32,8 +38,14 @@ func main() {
 	version := generaVersion()
 	parseCmdLineFlags(version)
 
+	//writeSyncer := getLogWriter()
+	logZap, _ := zap.NewProduction()
+	logger = logZap.Sugar()
+	defer logger.Sync()
+
 	myConf, err := leeConfiguracion()
 	if err != nil {
+		logger.Error(err.Error())
 		panic(err)
 	}
 
@@ -50,19 +62,19 @@ func main() {
 	for ; true; <-ticker.C {
 		equipos, err := obtieneEquiposFromRestService(preUrl, clHttp)
 		if err != nil {
-			//log.Fatal("no fue posible obtener la lista de equipos")
+			logger.Infof("no fue posible obtener la lista de equipos de la IP:%s error: %s", &preUrl, err.Error())
 			continue
 		}
 
 		for _, eq := range equipos {
 			// Aquí puede haber goroutines
-			urlSoap := generaUrlSoapService(eq.Ip, "5959")
+
+			puerto := strconv.Itoa(int(eq.Puerto))
+			urlSoap := generaUrlSoapService(eq.Ip, puerto)
 			datos, err := soapClient.ColectaInformacion(eq.Id, eq.Nombre, urlSoap)
 			if err != nil {
-				// si no fue posible obtener datos del equipo, debe mandar mensaje y pasar al siguiente equipo
-				//Escribe en el log el error de lectura en el equipo
-				//log.Fatal("no fue posible obtener datos del equipo tal en la IP tal")
-				//fmt.Println("No se obtuvieron datos")
+				logger.Infof("no fue posible obtener datos del equipo: %s - %s con la IP: %s error: %s",
+					eq.Id, eq.Nombre, urlSoap, err.Error())
 				continue
 			}
 
@@ -72,31 +84,28 @@ func main() {
 			}
 			chFiltro, err := filtroEquipoToRestService(preUrl, clHttp, &fltro)
 			if err != nil {
-				//Escribe en el log el error de modificación del filtro
-				//log.Fatal("error al intentar modificar el valor del campo filtro del equipo")
-				//fmt.Println("Error en FiltroEquipo")
+
+				logger.Infof("no fue posible modificar el valor del campo filtro del equipo: %s - %s con la IP: %s Función: %s error: %s",
+					eq.Id, eq.Nombre, preUrl, "FiltroEquipo", err.Error())
 				continue
 			}
 
 			if chFiltro == "Corrupto" {
-				//crear error por no poder cambiar el filtro
-				//Escribe en el log el error al ide modificación del filtro
-				//log.Fatal("el intento de modificar el valor del campo filtro del equipo no fue exitoso")
-				//fmt.Println("Filtro no cambiado - corrupto")
+				logger.Infof("no fue exitosa la modificación del valor del campo filtro del equipo: %s - %s con la IP: %s Función: %s retorno: %s",
+					eq.Id, eq.Nombre, preUrl, "FiltroEquipo", chFiltro)
 				continue
 			}
 
 			pa := generaAlarmasDelEquipo(eq.Id, datos)
 			res, err := procesaAlarmasToRestService(preUrl, clHttp, pa)
 			if err != nil {
-				//fmt.Println("Error en ProcesaAlarmasAtenea")
-				//log.Fatal("error al intentar procesar las alarmas del sistema")
+				logger.Infof("no fue posible el procesamiento de alarmas del equipo: %s - %s con la IP: %s Función: %s retorno: %s",
+					eq.Id, eq.Nombre, preUrl, "ProcesaAlarmas", err.Error())
 				continue
 			}
 			if res == "Corrupto" {
-				//fmt.Println("Error en ProcesaAlarmasAtenea - Corrupto")
-				//Registrar error de procesamiento de alarmas
-				//log.Fatal("el intento de procesar las alarmas no fue exitoso")
+				logger.Infof("no fue exitoso el procesamiento de alarmas del equipo: %s - %s con la IP: %s Función: %s retorno: %s",
+					eq.Id, eq.Nombre, preUrl, "ProcesaAlarmas", res)
 			}
 		}
 	}
@@ -297,4 +306,16 @@ func generaAlarmasDelEquipo(idEqu int32, datos *modelos.ColectadoServidor) *mode
 		DateServer:       datos.EquipoTimestamp.Format("2006-01-02"),
 		TimeServer:       datos.EquipoTimestamp.Format("15:04:05"),
 	}
+}
+
+// Save file log cut
+func getLogWriter() zapcore.WriteSyncer {
+	lumberJackLogger := &lumberjack.Logger{
+		Filename:   "./adaemon.log", // Log name
+		MaxSize:    1,               // File content size, MB
+		MaxBackups: 5,               // Maximum number of old files retained
+		MaxAge:     30,              // Maximum number of days to keep old files
+		Compress:   false,           // Is the file compressed
+	}
+	return zapcore.AddSync(lumberJackLogger)
 }
