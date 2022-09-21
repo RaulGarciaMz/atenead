@@ -55,7 +55,8 @@ func main() {
 	}
 
 	soapClient := colector.NewColector(&http.Client{})
-	clHttp := gohttp.NewBuilder().SetHttpClient(&http.Client{}).DisableTimeouts(true).Build()
+	//clHttp := gohttp.NewBuilder().SetHttpClient(&http.Client{}).DisableTimeouts(true).Build()
+	clHttp := gohttp.NewBuilder().SetConnectionTimeout(5 * time.Second).SetResponseTimeout(10 * time.Second).SetHttpClient(&http.Client{}).Build()
 	ticker := time.NewTicker(time.Duration(myConf.Tick) * time.Minute)
 	defer ticker.Stop()
 
@@ -69,8 +70,7 @@ func main() {
 		for _, eq := range equipos {
 			// Aquí puede haber goroutines
 
-			puerto := strconv.Itoa(int(eq.Puerto))
-			urlSoap := generaUrlSoapService(eq.Ip, puerto)
+			urlSoap := generaUrlSoapService(eq.Ip, eq.Puerto)
 			datos, err := soapClient.ColectaInformacion(eq.Id, eq.Nombre, urlSoap)
 			if err != nil {
 				logger.Infof("no fue posible obtener datos del equipo: %s - %s con la IP: %s error: %s",
