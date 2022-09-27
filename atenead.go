@@ -54,8 +54,19 @@ func main() {
 		panic(err)
 	}
 
-	soapClient := colector.NewColector(&http.Client{})
-	//clHttp := gohttp.NewBuilder().SetHttpClient(&http.Client{}).DisableTimeouts(true).Build()
+	equipoIntentos := make(map[int32]int)
+	c := &http.Client{
+		Transport: &http.Transport{
+			Dial: (&net.Dialer{
+				Timeout: 5 * time.Second,
+			}).Dial,
+		},
+		Timeout: 10 * time.Second,
+	}
+	soapClient := colector.NewColector(c)
+	//soapClient := colector.NewColector(&http.Client{})
+
+	//clHttp := gohttp.NewBuilder().SetHttpClient(&http.Client{Timeout: 5 * time.Second}).DisableTimeouts(true).Build()
 	clHttp := gohttp.NewBuilder().SetConnectionTimeout(5 * time.Second).SetResponseTimeout(10 * time.Second).SetHttpClient(&http.Client{}).Build()
 	ticker := time.NewTicker(time.Duration(myConf.Tick) * time.Minute)
 	defer ticker.Stop()
@@ -69,13 +80,59 @@ func main() {
 
 		for _, eq := range equipos {
 			// Aquí puede haber goroutines
+			eqAlc := modelos.EquipoAlcanzableParam{
+				Id:         eq.Id,
+				Fecha:      time.Now(),
+				Alcanzable: true,
+			}
+
+			ei, okEi := equipoIntentos[eq.Id]
+			if okEi {
+				if ei >= 2 {
+					// Manda llamar a la API para registrar no alcanzable
+					logger.Infof("no fue posible obtener datos del equipo")
+					equipoIntentos[eq.Id] = 0
+					eqAlc.Alcanzable = false
+					noAlc, err := equipoAlcanzableToRestService(preUrl, clHttp, &eqAlc)
+					if err != nil {
+						logger.Infof("no fue posible modificar el valor del campo alcanzable a FALSE en el equipo: %s - %s con la IP: %s Función: %s error: %s",
+							eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
+						continue
+					}
+
+					if noAlc == "Corrupto" {
+						logger.Infof("no fue posible modificar el valor del campo alcanzable del equipo: %s - %s con la IP: %s Función: %s error: %s",
+							eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
+						continue
+					}
+				}
+			} else {
+				equipoIntentos[eq.Id] = 0
+			}
 
 			urlSoap := generaUrlSoapService(eq.Ip, eq.Puerto)
 			datos, err := soapClient.ColectaInformacion(eq.Id, eq.Nombre, urlSoap)
 			if err != nil {
+				equipoIntentos[eq.Id] = equipoIntentos[eq.Id] + 1
 				logger.Infof("no fue posible obtener datos del equipo: %s - %s con la IP: %s error: %s",
 					eq.Id, eq.Nombre, urlSoap, err.Error())
 				continue
+			}
+
+			if ei > 0 {
+				equipoIntentos[eq.Id] = 0
+
+				eqAlc.Alcanzable = true
+				alcanza, err := equipoAlcanzableToRestService(preUrl, clHttp, &eqAlc)
+				if err != nil {
+					logger.Infof("no fue posible modificar el valor del campo alcanzable del equipo: %s - %s con la IP: %s Función: %s error: %s",
+						eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
+				}
+
+				if alcanza == "Corrupto" {
+					logger.Infof("no fue posible modificar el valor del campo alcanzable a TRUE en equipo: %s - %s con la IP: %s Función: %s error: %s",
+						eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
+				}
 			}
 
 			fltro := modelos.FiltroEquipoParam{
@@ -84,7 +141,6 @@ func main() {
 			}
 			chFiltro, err := filtroEquipoToRestService(preUrl, clHttp, &fltro)
 			if err != nil {
-
 				logger.Infof("no fue posible modificar el valor del campo filtro del equipo: %s - %s con la IP: %s Función: %s error: %s",
 					eq.Id, eq.Nombre, preUrl, "FiltroEquipo", err.Error())
 				continue
@@ -243,6 +299,24 @@ func filtroEquipoToRestService(preUrl string, clHttp gohttp.Client, pa *modelos.
 	sb := strings.Builder{}
 	sb.WriteString(preUrl)
 	sb.WriteString("/atenea/admin/equipo/filtro")
+
+	responseEq, errcli := clHttp.Post(sb.String(), pa)
+	if errcli != nil {
+		return "", errcli
+	}
+
+	if responseEq.StatusCode != 200 {
+		return "", fmt.Errorf("llamado a API %s con código %d ", sb.String(), responseEq.StatusCode)
+	}
+
+	return responseEq.String(), nil
+}
+
+// equipoAlcanzableToRestService envía al servicio REST el valor de la bandera de alcanzable para el equipo
+func equipoAlcanzableToRestService(preUrl string, clHttp gohttp.Client, pa *modelos.EquipoAlcanzableParam) (string, error) {
+	sb := strings.Builder{}
+	sb.WriteString(preUrl)
+	sb.WriteString("/atenea/admin/equipo/alcanzable")
 
 	responseEq, errcli := clHttp.Post(sb.String(), pa)
 	if errcli != nil {

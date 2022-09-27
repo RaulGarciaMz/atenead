@@ -43,3 +43,9 @@ type FiltroEquipoParam struct {
 	Id     int32
 	Filtro bool
 }
+
+type EquipoAlcanzableParam struct {
+	Id         int32
+	Alcanzable bool
+	Fecha      time.Time
+}
