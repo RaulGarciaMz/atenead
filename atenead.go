@@ -54,7 +54,10 @@ func main() {
 		panic(err)
 	}
 
-	equipoIntentos := make(map[int32]int)
+	equipoIntentos := modelos.IntentosConcurrente{}
+	equipoIntentos.Inicializa()
+
+	//equipoIntentos := make(map[int32]int)
 	c := &http.Client{
 		Transport: &http.Transport{
 			Dial: (&net.Dialer{
@@ -80,89 +83,7 @@ func main() {
 
 		for _, eq := range equipos {
 			// Aquí puede haber goroutines
-			eqAlc := modelos.EquipoAlcanzableParam{
-				Id:         eq.Id,
-				Fecha:      time.Now(),
-				Alcanzable: true,
-			}
-
-			ei, okEi := equipoIntentos[eq.Id]
-			if okEi {
-				if ei >= 2 {
-					// Manda llamar a la API para registrar no alcanzable
-					logger.Infof("no fue posible obtener datos del equipo")
-					equipoIntentos[eq.Id] = 0
-					eqAlc.Alcanzable = false
-					noAlc, err := equipoAlcanzableToRestService(preUrl, clHttp, &eqAlc)
-					if err != nil {
-						logger.Infof("no fue posible modificar el valor del campo alcanzable a FALSE en el equipo: %s - %s con la IP: %s Función: %s error: %s",
-							eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
-						continue
-					}
-
-					if noAlc == "Corrupto" {
-						logger.Infof("no fue posible modificar el valor del campo alcanzable del equipo: %s - %s con la IP: %s Función: %s error: %s",
-							eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
-						continue
-					}
-				}
-			} else {
-				equipoIntentos[eq.Id] = 0
-			}
-
-			urlSoap := generaUrlSoapService(eq.Ip, eq.Puerto)
-			datos, err := soapClient.ColectaInformacion(eq.Id, eq.Nombre, urlSoap)
-			if err != nil {
-				equipoIntentos[eq.Id] = equipoIntentos[eq.Id] + 1
-				logger.Infof("no fue posible obtener datos del equipo: %s - %s con la IP: %s error: %s",
-					eq.Id, eq.Nombre, urlSoap, err.Error())
-				continue
-			}
-
-			if ei > 0 {
-				equipoIntentos[eq.Id] = 0
-
-				eqAlc.Alcanzable = true
-				alcanza, err := equipoAlcanzableToRestService(preUrl, clHttp, &eqAlc)
-				if err != nil {
-					logger.Infof("no fue posible modificar el valor del campo alcanzable del equipo: %s - %s con la IP: %s Función: %s error: %s",
-						eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
-				}
-
-				if alcanza == "Corrupto" {
-					logger.Infof("no fue posible modificar el valor del campo alcanzable a TRUE en equipo: %s - %s con la IP: %s Función: %s error: %s",
-						eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
-				}
-			}
-
-			fltro := modelos.FiltroEquipoParam{
-				Id:     eq.Id,
-				Filtro: datos.HayFiltroAlarmas,
-			}
-			chFiltro, err := filtroEquipoToRestService(preUrl, clHttp, &fltro)
-			if err != nil {
-				logger.Infof("no fue posible modificar el valor del campo filtro del equipo: %s - %s con la IP: %s Función: %s error: %s",
-					eq.Id, eq.Nombre, preUrl, "FiltroEquipo", err.Error())
-				continue
-			}
-
-			if chFiltro == "Corrupto" {
-				logger.Infof("no fue exitosa la modificación del valor del campo filtro del equipo: %s - %s con la IP: %s Función: %s retorno: %s",
-					eq.Id, eq.Nombre, preUrl, "FiltroEquipo", chFiltro)
-				continue
-			}
-
-			pa := generaAlarmasDelEquipo(eq.Id, datos)
-			res, err := procesaAlarmasToRestService(preUrl, clHttp, pa)
-			if err != nil {
-				logger.Infof("no fue posible el procesamiento de alarmas del equipo: %s - %s con la IP: %s Función: %s retorno: %s",
-					eq.Id, eq.Nombre, preUrl, "ProcesaAlarmas", err.Error())
-				continue
-			}
-			if res == "Corrupto" {
-				logger.Infof("no fue exitoso el procesamiento de alarmas del equipo: %s - %s con la IP: %s Función: %s retorno: %s",
-					eq.Id, eq.Nombre, preUrl, "ProcesaAlarmas", res)
-			}
+			go procesaEquipo(eq, &equipoIntentos, preUrl, clHttp, soapClient)
 		}
 	}
 
@@ -392,4 +313,89 @@ func getLogWriter() zapcore.WriteSyncer {
 		Compress:   false,           // Is the file compressed
 	}
 	return zapcore.AddSync(lumberJackLogger)
+}
+
+func procesaEquipo(eq modelos.Equipo, equipoIntentos *modelos.IntentosConcurrente, preUrl string, clHttp gohttp.Client, soapClient *colector.Colector) {
+
+	eqAlc := modelos.EquipoAlcanzableParam{
+		Id:         eq.Id,
+		Fecha:      time.Now(),
+		Alcanzable: true,
+	}
+
+	ei, okEi := equipoIntentos.Read(eq.Id)
+	if okEi {
+		if ei >= 2 {
+			logger.Infof("no fue posible obtener datos del equipo")
+			equipoIntentos.Set(eq.Id, 0)
+			eqAlc.Alcanzable = false
+			noAlc, err := equipoAlcanzableToRestService(preUrl, clHttp, &eqAlc)
+			if err != nil {
+				logger.Infof("no fue posible modificar el valor del campo alcanzable a FALSE en el equipo: %s - %s con la IP: %s Función: %s error: %s",
+					eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
+				return
+			}
+
+			if noAlc == "Corrupto" {
+				logger.Infof("no fue posible modificar el valor del campo alcanzable del equipo: %s - %s con la IP: %s Función: %s error: %s",
+					eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
+			}
+		}
+	} else {
+		equipoIntentos.Set(eq.Id, 0)
+	}
+
+	urlSoap := generaUrlSoapService(eq.Ip, eq.Puerto)
+	datos, err := soapClient.ColectaInformacion(eq.Id, eq.Nombre, urlSoap)
+	if err != nil {
+		mas, _ := equipoIntentos.Read(eq.Id)
+		equipoIntentos.Set(eq.Id, mas+1)
+		logger.Infof("no fue posible obtener datos del equipo: %s - %s con la IP: %s error: %s",
+			eq.Id, eq.Nombre, urlSoap, err.Error())
+		return
+	}
+
+	if ei > 0 {
+		equipoIntentos.Set(eq.Id, 0)
+
+		eqAlc.Alcanzable = true
+		alcanza, err := equipoAlcanzableToRestService(preUrl, clHttp, &eqAlc)
+		if err != nil {
+			logger.Infof("no fue posible modificar el valor del campo alcanzable del equipo: %s - %s con la IP: %s Función: %s error: %s",
+				eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
+		}
+
+		if alcanza == "Corrupto" {
+			logger.Infof("no fue posible modificar el valor del campo alcanzable a TRUE en equipo: %s - %s con la IP: %s Función: %s error: %s",
+				eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
+		}
+	}
+
+	fltro := modelos.FiltroEquipoParam{
+		Id:     eq.Id,
+		Filtro: datos.HayFiltroAlarmas,
+	}
+	chFiltro, err := filtroEquipoToRestService(preUrl, clHttp, &fltro)
+	if err != nil {
+		logger.Infof("no fue posible modificar el valor del campo filtro del equipo: %s - %s con la IP: %s Función: %s error: %s",
+			eq.Id, eq.Nombre, preUrl, "FiltroEquipo", err.Error())
+		return
+	}
+
+	if chFiltro == "Corrupto" {
+		logger.Infof("no fue exitosa la modificación del valor del campo filtro del equipo: %s - %s con la IP: %s Función: %s retorno: %s",
+			eq.Id, eq.Nombre, preUrl, "FiltroEquipo", chFiltro)
+	}
+
+	pa := generaAlarmasDelEquipo(eq.Id, datos)
+	res, err := procesaAlarmasToRestService(preUrl, clHttp, pa)
+	if err != nil {
+		logger.Infof("no fue posible el procesamiento de alarmas del equipo: %s - %s con la IP: %s Función: %s retorno: %s",
+			eq.Id, eq.Nombre, preUrl, "ProcesaAlarmas", err.Error())
+		//continue
+	}
+	if res == "Corrupto" {
+		logger.Infof("no fue exitoso el procesamiento de alarmas del equipo: %s - %s con la IP: %s Función: %s retorno: %s",
+			eq.Id, eq.Nombre, preUrl, "ProcesaAlarmas", res)
+	}
 }
