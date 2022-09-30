@@ -82,7 +82,6 @@ func main() {
 		}
 
 		for _, eq := range equipos {
-			// Aquí puede haber goroutines
 			go procesaEquipo(eq, &equipoIntentos, preUrl, clHttp, soapClient)
 		}
 	}
@@ -323,10 +322,16 @@ func procesaEquipo(eq modelos.Equipo, equipoIntentos *modelos.IntentosConcurrent
 		Alcanzable: true,
 	}
 
-	ei, okEi := equipoIntentos.Read(eq.Id)
-	if okEi {
-		if ei >= 2 {
-			logger.Infof("no fue posible obtener datos del equipo")
+	mas, _ := equipoIntentos.Read(eq.Id)
+	urlSoap := generaUrlSoapService(eq.Ip, eq.Puerto)
+	datos, err := soapClient.ColectaInformacion(eq, urlSoap)
+	if err != nil {
+		equipoIntentos.Set(eq.Id, mas+1)
+		logger.Infof("Intento: %d, no fue posible obtener datos del equipo: %s - %s con la IP: %s error: %s", mas+1,
+			eq.Id, eq.Nombre, urlSoap, err.Error())
+
+		if mas+1 >= 3 {
+			logger.Infof("Set a NO alcanzable")
 			equipoIntentos.Set(eq.Id, 0)
 			eqAlc.Alcanzable = false
 			noAlc, err := equipoAlcanzableToRestService(preUrl, clHttp, &eqAlc)
@@ -341,34 +346,22 @@ func procesaEquipo(eq modelos.Equipo, equipoIntentos *modelos.IntentosConcurrent
 					eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
 			}
 		}
-	} else {
-		equipoIntentos.Set(eq.Id, 0)
-	}
 
-	urlSoap := generaUrlSoapService(eq.Ip, eq.Puerto)
-	datos, err := soapClient.ColectaInformacion(eq, urlSoap)
-	if err != nil {
-		mas, _ := equipoIntentos.Read(eq.Id)
-		equipoIntentos.Set(eq.Id, mas+1)
-		logger.Infof("no fue posible obtener datos del equipo: %s - %s con la IP: %s error: %s",
-			eq.Id, eq.Nombre, urlSoap, err.Error())
 		return
 	}
 
-	if ei > 0 {
-		equipoIntentos.Set(eq.Id, 0)
+	equipoIntentos.Set(eq.Id, 0)
 
-		eqAlc.Alcanzable = true
-		alcanza, err := equipoAlcanzableToRestService(preUrl, clHttp, &eqAlc)
-		if err != nil {
-			logger.Infof("no fue posible modificar el valor del campo alcanzable del equipo: %s - %s con la IP: %s Función: %s error: %s",
-				eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
-		}
+	eqAlc.Alcanzable = true
+	alcanza, err := equipoAlcanzableToRestService(preUrl, clHttp, &eqAlc)
+	if err != nil {
+		logger.Infof("no fue posible modificar el valor del campo alcanzable del equipo: %s - %s con la IP: %s Función: %s error: %s",
+			eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
+	}
 
-		if alcanza == "Corrupto" {
-			logger.Infof("no fue posible modificar el valor del campo alcanzable a TRUE en equipo: %s - %s con la IP: %s Función: %s error: %s",
-				eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
-		}
+	if alcanza == "Corrupto" {
+		logger.Infof("no fue posible modificar el valor del campo alcanzable a TRUE en equipo: %s - %s con la IP: %s Función: %s error: %s",
+			eq.Id, eq.Nombre, preUrl, "EquipoAlcanzable", err.Error())
 	}
 
 	fltro := modelos.FiltroEquipoParam{
