@@ -27,7 +27,7 @@ func NewColector(client *http.Client) *Colector {
 }
 
 // ColectaInformacion Realiza el llamado al servicio SOAP del equipo indicado y procesa el resultado para obtener las alarmas con timestamp ajustado
-func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl string) (*modelos.ColectadoServidor, error) {
+func (c Colector) ColectaInformacion(equipo modelos.Equipo, myurl string) (*modelos.ColectadoServidor, error) {
 
 	_, err := url.ParseRequestURI(myurl)
 	if err != nil {
@@ -37,7 +37,7 @@ func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl 
 	var resp *modelos.ColectadoServidor
 	hayFiltro := false
 
-	gtd, err := c.sc.GetDateTime(myurl)
+	gtd, err := c.sc.GetDateTime(myurl, equipo.Usuario, equipo.Password, equipo.Autenticacion)
 	if err != nil {
 		return resp, err
 	}
@@ -48,7 +48,7 @@ func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl 
 		return resp, err
 	}
 
-	filter, err := c.sc.GetAlarmFilter(myurl)
+	filter, err := c.sc.GetAlarmFilter(myurl, equipo.Usuario, equipo.Password, equipo.Autenticacion)
 	if err != nil {
 		return resp, err
 	}
@@ -56,7 +56,7 @@ func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl 
 		hayFiltro = true
 	}
 
-	alarmasEnEquipo, err := c.sc.GetAlarmList(myurl)
+	alarmasEnEquipo, err := c.sc.GetAlarmList(myurl, equipo.Usuario, equipo.Password, equipo.Autenticacion)
 	if err != nil {
 		return resp, err
 	}
@@ -81,7 +81,7 @@ func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl 
 			MsgPortVal = &intMsgPortVal
 		}
 
-		clave := fmt.Sprintf("%d%s%s%s%s%s", idEquipo, nombreEquipo, mid, ms, mins, mp)
+		clave := fmt.Sprintf("%d%s%s%s%s%s", equipo.Id, equipo.Nombre, mid, ms, mins, mp)
 
 		MsgIdVal, err := strconv.Atoi(alarmasEnEquipo.SoapBody.Resp.AlarmList[i].MsgId)
 		if err != nil {
@@ -109,8 +109,8 @@ func (c Colector) ColectaInformacion(idEquipo int32, nombreEquipo string, myurl 
 		diff := MsgSetTimeVal.Sub(timeServer)
 
 		alEnEquipo[clave] = modelos.ListaAlarma{
-			IdEquipo:        idEquipo,
-			Equipo:          nombreEquipo,
+			IdEquipo:        equipo.Id,
+			Equipo:          equipo.Nombre,
 			MsgId:           int64(MsgIdVal),
 			MsgSlot:         int32(MsgSlotVal),
 			MsgPort:         MsgPortVal,

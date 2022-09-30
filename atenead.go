@@ -346,7 +346,7 @@ func procesaEquipo(eq modelos.Equipo, equipoIntentos *modelos.IntentosConcurrent
 	}
 
 	urlSoap := generaUrlSoapService(eq.Ip, eq.Puerto)
-	datos, err := soapClient.ColectaInformacion(eq.Id, eq.Nombre, urlSoap)
+	datos, err := soapClient.ColectaInformacion(eq, urlSoap)
 	if err != nil {
 		mas, _ := equipoIntentos.Read(eq.Id)
 		equipoIntentos.Set(eq.Id, mas+1)

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/RaulGarciaMz/atenead/colector"
+	"github.com/RaulGarciaMz/atenead/modelos"
 	"github.com/RaulGarciaMz/go-httpclient/gohttp"
 )
 
@@ -12,7 +13,18 @@ func TestColector_ColectaInformacion(t *testing.T) {
 
 	f := colector.NewColector(&http.Client{})
 
-	data, err := f.ColectaInformacion(1, "Equipo 1", "http://195.159.183.43:5959/automation/service/v1")
+	eq := modelos.Equipo{
+		Id:            36,
+		Nombre:        "Dispositivo I",
+		Ip:            "195.159.183.43",
+		Descripcion:   "Equipo con autenticación 1",
+		Puerto:        "5959",
+		Usuario:       "admin",
+		Password:      "lyngsat",
+		Autenticacion: true,
+	}
+
+	data, err := f.ColectaInformacion(eq, "http://195.159.183.43:5959/automation/service/v1")
 	if err != nil {
 		t.Fatal("No pudo colectar información")
 	}

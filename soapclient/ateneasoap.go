@@ -34,7 +34,7 @@ func NewAteneaSoapHttp(c *http.Client) (*AteneaSoapHttp, error) {
 }
 
 // GetDateTime consulta el servicio SOAP para obtener la fecha del equipo
-func (s *AteneaSoapHttp) GetDateTime(url string) (*modelos.GetTimeDateResponse, error) {
+func (s *AteneaSoapHttp) GetDateTime(url, user, password string, autenticacion bool) (*modelos.GetTimeDateResponse, error) {
 
 	payload := []byte(strings.TrimSpace(`
 	<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:v1="http://www.appeartv.com/automation/v1">
@@ -56,7 +56,9 @@ func (s *AteneaSoapHttp) GetDateTime(url string) (*modelos.GetTimeDateResponse, 
 	req.Header.Set("Content-type", "text/xml")
 	req.Header.Set("SOAPAction", soapAction)
 
-	//client := &http.Client{}
+	if autenticacion {
+		req.SetBasicAuth(user, password)
+	}
 
 	// dispatch the request
 	res, err := s.cliente.Do(req)
@@ -65,11 +67,8 @@ func (s *AteneaSoapHttp) GetDateTime(url string) (*modelos.GetTimeDateResponse, 
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode > http.StatusOK {
-		return nil, errors.New("error no controlado. código 500 - Internal server error o superior")
-	}
-
-	if res.StatusCode == http.StatusOK {
+	switch res.StatusCode {
+	case http.StatusOK:
 		result := new(modelos.GetTimeDateResponse)
 		err = xml.NewDecoder(res.Body).Decode(result)
 		if err != nil {
@@ -77,13 +76,20 @@ func (s *AteneaSoapHttp) GetDateTime(url string) (*modelos.GetTimeDateResponse, 
 			return nil, err
 		}
 		return result, nil
-	}
 
-	return nil, errors.New("error no considerado para controlar")
+	case http.StatusUnauthorized:
+		return nil, errors.New("error en la autenticación credenciales no válidas")
+
+	case http.StatusInternalServerError:
+		return nil, errors.New("error 500 interno en el servidor")
+
+	default:
+		return nil, errors.New("error no considerado para controlar")
+	}
 }
 
 // GetAlarmFilter consulta el servicio SOAP para obtener las alarmas con filtro del equipo
-func (s *AteneaSoapHttp) GetAlarmFilter(url string) (*modelos.GetAlarmFilterResponse, error) {
+func (s *AteneaSoapHttp) GetAlarmFilter(url, user, password string, autenticacion bool) (*modelos.GetAlarmFilterResponse, error) {
 
 	payload := []byte(strings.TrimSpace(`
 	<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:v1="http://www.appeartv.com/automation/v1">
@@ -105,7 +111,9 @@ func (s *AteneaSoapHttp) GetAlarmFilter(url string) (*modelos.GetAlarmFilterResp
 	req.Header.Set("Content-type", "text/xml")
 	req.Header.Set("SOAPAction", soapAction)
 
-	//client := &http.Client{}
+	if autenticacion {
+		req.SetBasicAuth(user, password)
+	}
 
 	// dispatch the request
 	res, err := s.cliente.Do(req)
@@ -114,11 +122,8 @@ func (s *AteneaSoapHttp) GetAlarmFilter(url string) (*modelos.GetAlarmFilterResp
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode > http.StatusOK {
-		return nil, errors.New("error no controlado. código 500 - Internal server error o superior")
-	}
-
-	if res.StatusCode == http.StatusOK {
+	switch res.StatusCode {
+	case http.StatusOK:
 		result := new(modelos.GetAlarmFilterResponse)
 		err = xml.NewDecoder(res.Body).Decode(result)
 		if err != nil {
@@ -126,13 +131,20 @@ func (s *AteneaSoapHttp) GetAlarmFilter(url string) (*modelos.GetAlarmFilterResp
 			return nil, err
 		}
 		return result, nil
-	}
 
-	return nil, errors.New("error no considerado para controlar")
+	case http.StatusUnauthorized:
+		return nil, errors.New("error en la autenticación credenciales no válidas")
+
+	case http.StatusInternalServerError:
+		return nil, errors.New("error 500 interno en el servidor")
+
+	default:
+		return nil, errors.New("error no considerado para controlar")
+	}
 }
 
 // GetAlarmList consulta el servicio SOAP para obtener las alasrmas del equipo
-func (s *AteneaSoapHttp) GetAlarmList(url string) (*modelos.GetAlarmListResponse, error) {
+func (s *AteneaSoapHttp) GetAlarmList(url, user, password string, autenticacion bool) (*modelos.GetAlarmListResponse, error) {
 
 	// payload
 	payload := []byte(strings.TrimSpace(`
@@ -156,7 +168,9 @@ func (s *AteneaSoapHttp) GetAlarmList(url string) (*modelos.GetAlarmListResponse
 	req.Header.Set("Content-type", "text/xml")
 	req.Header.Set("SOAPAction", soapAction)
 
-	//client := &http.Client{}
+	if autenticacion {
+		req.SetBasicAuth(user, password)
+	}
 
 	// dispatch the request
 	res, err := s.cliente.Do(req)
@@ -165,11 +179,8 @@ func (s *AteneaSoapHttp) GetAlarmList(url string) (*modelos.GetAlarmListResponse
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode > http.StatusOK {
-		return nil, errors.New("error no controlado. código 500 - Internal server error o superior")
-	}
-
-	if res.StatusCode == http.StatusOK {
+	switch res.StatusCode {
+	case http.StatusOK:
 		result := new(modelos.GetAlarmListResponse)
 		err = xml.NewDecoder(res.Body).Decode(result)
 		if err != nil {
@@ -177,7 +188,14 @@ func (s *AteneaSoapHttp) GetAlarmList(url string) (*modelos.GetAlarmListResponse
 			return nil, err
 		}
 		return result, nil
-	}
 
-	return nil, errors.New("error no considerado para controlar")
+	case http.StatusUnauthorized:
+		return nil, errors.New("error en la autenticación credenciales no válidas")
+
+	case http.StatusInternalServerError:
+		return nil, errors.New("error 500 interno en el servidor")
+
+	default:
+		return nil, errors.New("error no considerado para controlar")
+	}
 }
